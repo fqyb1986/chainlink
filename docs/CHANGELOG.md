@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bump `ORM_MAX_OPEN_CONNS` default from 10 to 20
+- Bump `ORM_MAX_IDLE_CONNS` default from 5 to 10
+
+Each Chainlink node will now use a maximum of 23 database connections (up from previous max of 13). Make sure your postgres database is tuned accordingly, especially if you are running multiple Chainlink nodes on a single database. If you find yourself hitting connection limits, you can consider reducing `ORM_MAX_OPEN_CONNS` but this may result in degraded performance.
+
 ## [0.10.1] - 2021-02-23
 
 ### Fixed
