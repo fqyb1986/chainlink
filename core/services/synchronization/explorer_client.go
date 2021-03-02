@@ -283,7 +283,7 @@ func (ec *explorerClient) writePump(ctx context.Context) {
 
 			err := ec.writeMessage(message, websocket.TextMessage)
 			if err != nil {
-				logger.Error("websocketStatsPusher: ", err)
+				logger.Warnw("websocketStatsPusher: error writing text message", "err", err)
 				return
 			}
 		case message, open := <-ec.sendBinary:
@@ -293,7 +293,7 @@ func (ec *explorerClient) writePump(ctx context.Context) {
 
 			err := ec.writeMessage(message, websocket.BinaryMessage)
 			if err != nil {
-				logger.Error("websocketStatsPusher: ", err)
+				logger.Warnw("websocketStatsPusher: error writing binary message", "err", err)
 				return
 			}
 		case <-ticker.C:
@@ -316,6 +316,7 @@ func (ec *explorerClient) writeMessage(message []byte, messageType int) error {
 	if _, err := writer.Write(message); err != nil {
 		return err
 	}
+	logger.Debugw("websocketStatsPusher successfully wrote message", "messageType", messageType, "message", message)
 
 	return writer.Close()
 }

@@ -6,17 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/smartcontractkit/chainlink/core/services/pipeline"
-
 	"github.com/ethereum/go-ethereum/accounts/abi"
-
-	"github.com/jinzhu/gorm"
 	"github.com/pkg/errors"
+	"gorm.io/gorm"
 
+	"github.com/smartcontractkit/chainlink/core/internal/gethwrappers/generated/offchain_aggregator_wrapper"
 	"github.com/smartcontractkit/chainlink/core/logger"
 	"github.com/smartcontractkit/chainlink/core/services/eth"
 	"github.com/smartcontractkit/chainlink/core/services/job"
 	"github.com/smartcontractkit/chainlink/core/services/log"
+	"github.com/smartcontractkit/chainlink/core/services/pipeline"
 	"github.com/smartcontractkit/chainlink/core/store/orm"
 	"github.com/smartcontractkit/libocr/gethwrappers/offchainaggregator"
 	ocr "github.com/smartcontractkit/libocr/offchainreporting"
@@ -59,6 +58,11 @@ func (d Delegate) ServicesForSpec(jobSpec job.SpecDB) (services []job.Service, e
 	}
 	concreteSpec := jobSpec.OffchainreportingOracleSpec
 
+	contract, err := offchain_aggregator_wrapper.NewOffchainAggregator(concreteSpec.ContractAddress.Address(), d.ethClient)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not instantiate NewOffchainAggregator")
+	}
+
 	contractFilterer, err := offchainaggregator.NewOffchainAggregatorFilterer(concreteSpec.ContractAddress.Address(), d.ethClient)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not instantiate NewOffchainAggregatorFilterer")
@@ -70,7 +74,7 @@ func (d Delegate) ServicesForSpec(jobSpec job.SpecDB) (services []job.Service, e
 	}
 
 	ocrContract, err := NewOCRContractConfigTracker(
-		concreteSpec.ContractAddress.Address(),
+		contract,
 		contractFilterer,
 		contractCaller,
 		d.ethClient,
@@ -125,12 +129,17 @@ func (d Delegate) ServicesForSpec(jobSpec job.SpecDB) (services []job.Service, e
 	}
 	logger.Info(fmt.Sprintf("OCR job using local config %+v", lc))
 
+	db, errdb := d.db.DB()
+	if errdb != nil {
+		return nil, errors.Wrap(errdb, "unable to open sql db")
+	}
+
 	if concreteSpec.IsBootstrapPeer {
 		bootstrapper, err := ocr.NewBootstrapNode(ocr.BootstrapNodeArgs{
 			BootstrapperFactory:   peerWrapper.Peer,
 			Bootstrappers:         bootstrapPeers,
 			ContractConfigTracker: ocrContract,
-			Database:              NewDB(d.db.DB(), concreteSpec.ID),
+			Database:              NewDB(db, concreteSpec.ID),
 			LocalConfig:           lc,
 			Logger:                ocrLogger,
 		})
@@ -160,15 +169,16 @@ func (d Delegate) ServicesForSpec(jobSpec job.SpecDB) (services []job.Service, e
 			return nil, err
 		}
 		contractTransmitter := NewOCRContractTransmitter(concreteSpec.ContractAddress.Address(), contractCaller, contractABI,
-			NewTransmitter(d.db.DB(), ta.Address(), d.config.EthGasLimitDefault()))
+			NewTransmitter(db, ta.Address(), d.config.EthGasLimitDefault()))
 
-		ds, err := newDatasource(d.db, jobSpec.ID, d.pipelineRunner)
-		if err != nil {
-			return nil, errors.Wrap(err, "error instantiating data source")
-		}
 		oracle, err := ocr.NewOracle(ocr.OracleArgs{
-			Database:                     NewDB(d.db.DB(), concreteSpec.ID),
-			Datasource:                   ds,
+			Database: NewDB(db, concreteSpec.ID),
+			Datasource: dataSource{
+				pipelineRunner: d.pipelineRunner,
+				jobID:          jobSpec.ID,
+				ocrLogger:      *loggerWith,
+				spec:           *jobSpec.PipelineSpec,
+			},
 			LocalConfig:                  lc,
 			ContractTransmitter:          contractTransmitter,
 			ContractConfigTracker:        ocrContract,

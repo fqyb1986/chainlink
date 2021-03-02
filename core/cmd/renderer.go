@@ -87,6 +87,8 @@ func (rt RendererTable) Render(v interface{}) error {
 		return rt.renderOCRKeys([]ocrkey.EncryptedKeyBundle{*typed})
 	case *[]ocrkey.EncryptedKeyBundle:
 		return rt.renderOCRKeys(*typed)
+	case *[]Job:
+		return rt.renderJobsV2(*typed)
 	default:
 		return fmt.Errorf("unable to render object of type %T: %v", typed, typed)
 	}
@@ -99,6 +101,19 @@ func (rt RendererTable) renderJobs(jobs []models.JobSpec) error {
 	}
 
 	render("Jobs", table)
+	return nil
+}
+
+func (rt RendererTable) renderJobsV2(jobs []Job) error {
+	table := rt.newTable([]string{"ID", "Name", "Type", "Tasks", "Created At"})
+	table.SetAutoMergeCells(true)
+	for _, j := range jobs {
+		for _, r := range j.ToRow() {
+			table.Append(r)
+		}
+	}
+
+	render("Jobs (V2)", table)
 	return nil
 }
 
@@ -398,7 +413,7 @@ func (rt RendererTable) renderETHKeys(keys []presenters.ETHKey) error {
 			lastUsed = key.LastUsed.String()
 		}
 		var deletedAt string
-		if !key.DeletedAt.IsZero() {
+		if key.DeletedAt.Valid {
 			deletedAt = key.DeletedAt.Time.String()
 		}
 		rows = append(rows, []string{
@@ -421,7 +436,7 @@ func (rt RendererTable) renderP2PKeys(p2pKeys []p2pkey.EncryptedP2PKey) error {
 	var rows [][]string
 	for _, key := range p2pKeys {
 		var deletedAt string
-		if !key.DeletedAt.IsZero() {
+		if key.DeletedAt.Valid {
 			deletedAt = key.DeletedAt.Time.String()
 		}
 		rows = append(rows, []string{
@@ -442,7 +457,7 @@ func (rt RendererTable) renderOCRKeys(ocrKeys []ocrkey.EncryptedKeyBundle) error
 	var rows [][]string
 	for _, key := range ocrKeys {
 		var deletedAt string
-		if !key.DeletedAt.IsZero() {
+		if key.DeletedAt.Valid {
 			deletedAt = key.DeletedAt.Time.String()
 		}
 		rows = append(rows, []string{

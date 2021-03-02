@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
+
+	"github.com/jpillora/backoff"
 
 	"github.com/smartcontractkit/chainlink/core/logger"
 	"github.com/smartcontractkit/chainlink/core/services/eth"
@@ -68,9 +71,15 @@ func StartJobSubscription(job models.JobSpec, head *models.Head, store *strpkg.S
 
 // Unsubscribe stops the subscription and cleans up associated resources.
 func (js JobSubscription) Unsubscribe() {
+	waiter := sync.WaitGroup{}
+	waiter.Add(len(js.unsubscribers))
 	for _, sub := range js.unsubscribers {
-		sub.Unsubscribe()
+		go func(sub Unsubscriber) {
+			sub.Unsubscribe()
+			waiter.Done()
+		}(sub)
 	}
+	waiter.Wait()
 }
 
 // InitiatorSubscription encapsulates all functionality needed to wrap an ethereum subscription
@@ -248,7 +257,26 @@ func (sub ManagedSubscription) listenToLogs(q ethereum.FilterQuery) {
 			}
 		case err, ok := <-sub.ethSubscription.Err():
 			if ok {
-				logger.Errorw(fmt.Sprintf("Error in log subscription: %s", err.Error()), "err", err)
+				logger.Warnw("Error in log subscription. Attempting to reconnect to eth node", "err", err)
+				b := &backoff.Backoff{
+					Min:    100 * time.Millisecond,
+					Max:    10 * time.Second,
+					Factor: 2,
+					Jitter: false,
+				}
+				for {
+					newLogs := make(chan models.Log)
+					newSub, err := sub.logSubscriber.SubscribeFilterLogs(context.Background(), q, newLogs)
+					if err != nil {
+						logger.Warnw(fmt.Sprintf("Failed to reconnect to eth node. Trying again in %v", b.Duration()), "err", err.Error())
+						time.Sleep(b.Duration())
+						continue
+					}
+					sub.ethSubscription = newSub
+					sub.logs = newLogs
+					logger.Infow("Successfully reconnected to eth node.")
+					break
+				}
 			}
 		}
 	}
